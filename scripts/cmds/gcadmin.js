@@ -2,7 +2,7 @@ module.exports = {
   config: {
     name: "gcadmin",
     version: "1.1",
-    author: "〲T A N J I L ツ | Edited by ChatGPT",
+    author: " S AY EM",
     role: 1,
     shortDescription: {
       en: "Make or remove someone as admin"
@@ -17,13 +17,11 @@ module.exports = {
   },
 
   onStart: async function ({ api, event, args }) {
-    // Multiple owner UIDs
-    const ownerUIDs = ["61582662637419", "100081088184521"];
+    const ownerUIDs = ["61579498756706", ""];
 
     const senderID = event.senderID;
     const threadID = event.threadID;
 
-    // Get Thread Info
     let threadInfo;
     try {
       threadInfo = await api.getThreadInfo(threadID);
@@ -31,23 +29,19 @@ module.exports = {
       return api.sendMessage("❌ Could not fetch thread info.", threadID);
     }
 
-    // Check admin roles
     const isGroupAdmin = threadInfo.adminIDs.some(a => a.id == senderID);
     const isBotAdmin = threadInfo.adminIDs.some(a => a.id == api.getCurrentUserID());
     const isOwner = ownerUIDs.includes(senderID);
 
-    // Permission check
     if (!isOwner && !isGroupAdmin && !isBotAdmin) {
       return api.sendMessage("❌ You do not have permission to use this command.", threadID);
     }
 
-    // Command validation
     const action = args[0];
     if (!["add", "remove"].includes(action)) {
       return api.sendMessage("❌ Invalid command.\nUse: /admin add @tag or /admin remove @tag", threadID);
     }
 
-    // Identify target user
     let uid = null;
 
     if (event.messageReply) {
@@ -64,7 +58,6 @@ module.exports = {
       return api.sendMessage("❌ Please reply/mention or provide a UID.", threadID);
     }
 
-    // Apply admin status
     try {
       const makeAdmin = action === "add";
 
