@@ -1,187 +1,299 @@
-const { createCanvas, loadImage } = require('canvas');
-const fs = require('fs-extra');
-const path = require('path');
 const axios = require('axios');
-
-const nx_210 = "xalman";
+const fs = require('fs-extra');
+const { createCanvas, loadImage } = require('canvas');
+const path = require('path');
 
 module.exports = {
-    config: {
-        name: "balance",
-        aliases: ["bal"],
-        version: "5.0",
-        author: "xalman",
-        countDown: 2,
-        role: 0,
-        description: "View balance card, transfer money, and track 10-day history",
-        category: "economy",
-        guide: { en: "{pn} | {pn} transfer @tag [amount] | {pn} history" }
-    },
-
-    onStart: async function ({ message, usersData, event, args }) {
-        const senderID = event.senderID;
-        const today = new Date().toISOString().split('T')[0];
-
-        const formatBalance = (num) => {
-            const n = Number(num);
-            if (n === Infinity || isNaN(n)) return "∞ Unlimited";
-            if (n < 1000) return n.toFixed(0);
-            const units = [
-                { v: 1e12, s: "T" }, { v: 1e9, s: "B" }, { v: 1e6, s: "M" }, { v: 1e3, s: "K" }
-            ];
-            for (let i = 0; i < units.length; i++) {
-                if (n >= units[i].v) return (n / units[i].v).toFixed(2).replace(/\.00$/, '') + units[i].s;
-            }
-            return n.toLocaleString();
-        };
-
-        const getTargetUID = () => {
-            if (event.messageReply) return event.messageReply.senderID;
-            if (Object.keys(event.mentions).length > 0) return Object.keys(event.mentions)[0];
-            if (args[1] && !isNaN(args[1])) return args[1];
-            return null;
-        };
-
-        let userData = await usersData.get(senderID);
-        let history = userData.balanceHistory || [];
-        let currentMoney = Number(userData.money || 0);
-
-        if (history.length === 0 || history[history.length - 1].date !== today) {
-            history.push({ date: today, balance: currentMoney });
-            if (history.length > 10) history.shift();
-            await usersData.set(senderID, { balanceHistory: history });
-        }
-
-        if (args[0] === "history") {
-            if (history.length < 2) return message.reply("📉 Not enough data yet! Check again tomorrow.");
-            
-            let historyMsg = `📊 𝗟𝗔𝗦𝗧 𝟭𝟬 𝗗𝗔𝗬𝗦 𝗕𝗔𝗟𝗔𝗡𝗖𝗘 𝗟𝗢𝗚\n━━━━━━━━━━━━━━━━━━\n`;
-            const displayHistory = [...history].reverse();
-            
-            displayHistory.forEach((entry, i) => {
-                const prevEntry = displayHistory[i + 1];
-                let change = "";
-                if (prevEntry) {
-                    const diff = entry.balance - prevEntry.balance;
-                    if (diff > 0) change = ` 📈 +$${formatBalance(diff)}`;
-                    else if (diff < 0) change = ` 📉 -$${formatBalance(Math.abs(diff))}`;
-                    else change = ` ➖ No change`;
-                }
-                historyMsg += `📅 ${entry.date}\n💰 $${formatBalance(entry.balance)}${change}\n──────────────────\n`;
-            });
-            return message.reply(historyMsg);
-        }
-
-        if (args[0] === "transfer") {
-            const targetUID = getTargetUID();
-            const amountStr = args[args.length - 1];
-            let amount = parseInt(amountStr);
-
-            if (amountStr && amountStr.toLowerCase().endsWith('k')) amount *= 1000;
-            if (amountStr && amountStr.toLowerCase().endsWith('m')) amount *= 1000000;
-
-            if (!targetUID || targetUID === senderID || isNaN(amount) || amount <= 0) {
-                return message.reply("❌ Usage: balance transfer @tag [amount]");
-            }
-
-            if (currentMoney < amount) return message.reply("❌ Insufficient balance!");
-
-            const receiverData = await usersData.get(targetUID);
-            if (!receiverData) return message.reply("❌ Receiver not found!");
-
-            await usersData.set(senderID, { money: (currentMoney - amount).toString() });
-            await usersData.set(targetUID, { money: (Number(receiverData.money || 0) + amount).toString() });
-
-            return message.reply(`✅ Transferred $${formatBalance(amount)} to ${receiverData.name}\nSystem Provider: ${nx_210}`);
-        }
-
-        const createUniqueCard = async (name, balance, uid) => {
-            const canvas = createCanvas(800, 450);
-            const ctx = canvas.getContext('2d');
-            const gradient = ctx.createLinearGradient(0, 0, 800, 450);
-            gradient.addColorStop(0, '#0f0c29');
-            gradient.addColorStop(0.5, '#302b63');
-            gradient.addColorStop(1, '#24243e');
-            ctx.fillStyle = gradient;
-            ctx.beginPath();
-            ctx.roundRect(0, 0, 800, 450, 30);
-            ctx.fill();
-
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
-            ctx.lineWidth = 2;
-            for (let i = 0; i < 10; i++) {
-                ctx.beginPath();
-                ctx.moveTo(0, 100 + i * 30);
-                ctx.bezierCurveTo(200, 50 + i * 20, 500, 400 + i * 20, 800, 300);
-                ctx.stroke();
-            }
-
-            ctx.font = "bold 32px Arial";
-            ctx.fillStyle = "#ffffff";
-            ctx.fillText("GOAT BANK LTD.", 50, 60);
-
-            try {
-                const avatarURL = `https://graph.facebook.com/${uid}/picture?width=512&height=512&access_token=6628568379%7Cc1e620fa708a1d5696fb991c1bde5662`;
-                const response = await axios.get(avatarURL, { responseType: 'arraybuffer' });
-                const avatarImg = await loadImage(Buffer.from(response.data));
-                ctx.save();
-                ctx.shadowColor = '#00d2ff';
-                ctx.shadowBlur = 20;
-                ctx.beginPath();
-                ctx.arc(100, 150, 60, 0, Math.PI * 2);
-                ctx.clip();
-                ctx.drawImage(avatarImg, 40, 90, 120, 120);
-                ctx.restore();
-                ctx.strokeStyle = "#00d2ff";
-                ctx.lineWidth = 3;
-                ctx.stroke();
-            } catch (e) {}
-
-            ctx.fillStyle = "#ffffff";
-            ctx.font = "italic bold 40px sans-serif";
-            ctx.fillText("VISA", 650, 60);
-            ctx.font = "20px Arial";
-            ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
-            ctx.fillText("AVAILABLE BALANCE", 60, 260);
-
-            const displayBal = formatBalance(balance);
-            ctx.shadowColor = "#00d2ff";
-            ctx.shadowBlur = 15;
-            ctx.fillStyle = "#00d2ff";
-            if (displayBal.length > 12) ctx.font = "bold 45px Arial";
-            else if (displayBal.length > 8) ctx.font = "bold 60px Arial";
-            else ctx.font = "bold 80px Arial";
-            ctx.fillText(`$${displayBal}`, 60, 330);
-
-            ctx.shadowBlur = 0;
-            ctx.font = "28px monospace";
-            ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-            const formattedUID = uid.toString().padEnd(16, '0').match(/.{1,4}/g).join("  ");
-            ctx.fillText(formattedUID, 60, 385);
-
-            ctx.font = "bold 25px Arial";
-            ctx.fillStyle = "#ffffff";
-            ctx.fillText(name.toUpperCase(), 60, 420);
-            ctx.font = "18px Arial";
-            ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-            ctx.fillText("VALID THRU: 12/29", 580, 420);
-
-            const cachePath = path.join(__dirname, "cache");
-            if (!fs.existsSync(cachePath)) fs.ensureDirSync(cachePath);
-            const cardPath = path.join(cachePath, `premium_card_${uid}.png`);
-            fs.writeFileSync(cardPath, canvas.toBuffer());
-            return cardPath;
-        };
-
-        const targetID = getTargetUID() || senderID;
-        const targetData = await usersData.get(targetID);
-        if (!targetData) return message.reply("User not found!");
-
-        const cardImg = await createUniqueCard(targetData.name || "Global User", targetData.money || 0, targetID);
-        
-        return message.reply({
-            body: `💰 Balance: $${formatBalance(targetData.money || 0)}`,
-            attachment: fs.createReadStream(cardImg)
-        }, () => { if(fs.existsSync(cardImg)) fs.unlinkSync(cardImg); });
+  config: {
+    name: "balance",
+    aliases: ["b", "bal"],
+    version: "1.1",
+    author: "Rasin",
+    prefix: false,
+    countDown: 5,
+    role: 0,
+    description: "Check balance with wallet card design",
+    category: "economy",
+    guide: {
+      en: "{pn} balance | Check your balance with card\n"
+        + "{pn} balance @user | Check others balance\n"
+        + "{pn} balance <name> | Search user by name and check balance\n"
+        + "{pn} balance <uid> | Check balance by user ID\n"
+        + "{pn} balance [reply] | Check replied user's balance\n"
     }
+  },
+
+  langs: {
+    en: {
+      notFound: "User '%1' not found in this conversation",
+      multiple: "Multiple users found with name '%1':\n%2\n\nPlease use their UID or be more specific.",
+      error: "❌ Error generating wallet card. Please try again.",
+      cardMessage: "👀 %1 Your Balance ✨\n\n🧸💵 %2"
+    }
+  },
+
+  onStart: async function ({ message, event, args, usersData, api, getLang }) {
+    const { senderID, messageReply, mentions } = event;
+
+    try {
+      let targetID = senderID;
+
+      if (messageReply?.senderID && !args[0]) {
+        targetID = messageReply.senderID;
+      } 
+      else if (Object.keys(mentions).length > 0) {
+        targetID = Object.keys(mentions)[0];
+      }
+      else if (args[0] && /^\d+$/.test(args[0])) {
+        targetID = args[0];
+      }
+      else if (args[0]) {
+        const query = args.join(" ");
+        const matches = await findUserByName(api, usersData, event.threadID, query);
+
+        if (matches.length === 0) {
+          return message.reply(getLang("notFound", query.replace(/@/g, "")));
+        }
+
+        if (matches.length > 1) {
+          const matchList = matches.map(m => `• ${m.name}: ${m.uid}`).join('\n');
+          return message.reply(getLang("multiple", query.replace(/@/g, ""), matchList));
+        }
+
+        targetID = matches[0].uid;
+      }
+
+      const userData = await usersData.get(targetID);
+      const userName = await usersData.getName(targetID);
+      const userMoney = userData.money || 0;
+
+      const avatarUrl = `https://arshi-facebook-pp.vercel.app/api/pp?uid=${targetID}`;
+
+      const formatMoney = (amount) => {
+        if (isNaN(amount)) return "$0";
+        amount = Number(amount);
+        const scales = [
+          { value: 1e15, suffix: 'Q' },
+          { value: 1e12, suffix: 'T' },
+          { value: 1e9, suffix: 'B' },
+          { value: 1e6, suffix: 'M' },
+          { value: 1e3, suffix: 'k' }
+        ];
+        const scale = scales.find(s => amount >= s.value);
+        if (scale) {
+          const scaledValue = amount / scale.value;
+          return `$${scaledValue.toFixed(1)}${scale.suffix}`;
+        }
+        return `$${amount.toLocaleString()}`;
+      };
+
+      const canvas = createCanvas(800, 450);
+      const ctx = canvas.getContext('2d');
+
+      const bgGradient = ctx.createLinearGradient(0, 0, 800, 450);
+      bgGradient.addColorStop(0, '#0f0c29');
+      bgGradient.addColorStop(0.5, '#302b63');
+      bgGradient.addColorStop(1, '#24243e');
+      ctx.fillStyle = bgGradient;
+      ctx.fillRect(0, 0, 800, 450);
+
+      ctx.globalAlpha = 0.08;
+      for (let i = 0; i < 8; i++) {
+        ctx.strokeStyle = '#00d4ff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(600 + i * 20, 50 + i * 30, 80, 80);
+      }
+      
+      ctx.strokeStyle = '#ff0080';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 15; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * 60, 0);
+        ctx.lineTo(i * 60 + 150, 450);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      const roundRect = (x, y, w, h, r) => {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+      };
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.lineWidth = 2;
+      roundRect(40, 40, 720, 370, 25);
+      ctx.fill();
+      ctx.stroke();
+
+      const accentGradient = ctx.createLinearGradient(40, 40, 760, 40);
+      accentGradient.addColorStop(0, '#00d4ff');
+      accentGradient.addColorStop(0.5, '#ff0080');
+      accentGradient.addColorStop(1, '#00ffaa');
+      ctx.fillStyle = accentGradient;
+      roundRect(40, 40, 720, 8, 25);
+      ctx.fill();
+
+      try {
+        const avatarResponse = await axios.get(avatarUrl, { responseType: 'arraybuffer' });
+        const avatar = await loadImage(Buffer.from(avatarResponse.data));
+        
+        ctx.shadowColor = '#00d4ff';
+        ctx.shadowBlur = 25;
+        ctx.beginPath();
+        ctx.arc(140, 160, 85, 0, Math.PI * 2);
+        ctx.strokeStyle = '#00d4ff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.arc(140, 160, 75, 0, Math.PI * 2);
+        ctx.strokeStyle = '#ff0080';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(140, 160, 68, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(avatar, 72, 92, 136, 136);
+        ctx.restore();
+      } catch (err) {
+        ctx.beginPath();
+        ctx.arc(140, 160, 68, 0, Math.PI * 2);
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fill();
+        ctx.strokeStyle = '#00d4ff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = '#00d4ff';
+      ctx.font = 'bold 26px Arial';
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.fillText(userName.toUpperCase(), 140, 270);
+      ctx.shadowBlur = 0;
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(300, 80);
+      ctx.lineTo(300, 350);
+      ctx.stroke();
+
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 16px Arial';
+      ctx.fillStyle = '#999999';
+      ctx.fillText('💰 YOUR BALANCE', 340, 100);
+
+      const balanceGradient = ctx.createLinearGradient(340, 110, 700, 180);
+      balanceGradient.addColorStop(0, '#00d4ff');
+      balanceGradient.addColorStop(0.5, '#ff0080');
+      balanceGradient.addColorStop(1, '#00ffaa');
+      ctx.fillStyle = balanceGradient;
+      ctx.font = 'bold 80px Arial';
+      ctx.fillText(formatMoney(userMoney), 340, 180);
+
+      ctx.strokeStyle = accentGradient;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(340, 200);
+      ctx.lineTo(720, 200);
+      ctx.stroke();
+
+      const infoCards = [
+        { icon: '⚡', text: 'Fast Transactions', x: 340, y: 240 },
+        { icon: '🔒', text: 'Secure Wallet', x: 540, y: 240 }
+      ];
+
+      infoCards.forEach(card => {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        roundRect(card.x, card.y, 160, 50, 10);
+        ctx.fill();
+        
+        ctx.strokeStyle = 'rgba(0, 212, 255, 0.3)';
+        ctx.lineWidth = 1;
+        roundRect(card.x, card.y, 160, 50, 10);
+        ctx.stroke();
+        
+        ctx.font = '24px Arial';
+        ctx.fillStyle = '#00d4ff';
+        ctx.fillText(card.icon, card.x + 15, card.y + 35);
+        
+        ctx.font = '13px Arial';
+        ctx.fillStyle = '#cccccc';
+        ctx.fillText(card.text, card.x + 50, card.y + 32);
+      });
+
+      ctx.textAlign = 'right';
+      ctx.font = 'bold 18px Arial';
+      const brandGradient = ctx.createLinearGradient(600, 340, 720, 340);
+      brandGradient.addColorStop(0, '#00d4ff');
+      brandGradient.addColorStop(1, '#ff0080');
+      ctx.fillStyle = brandGradient;
+      ctx.fillText('DIGITAL WALLET', 720, 345);
+
+      const circles = [
+        { x: 680, y: 90, r: 30, color: 'rgba(0, 212, 255, 0.1)' },
+        { x: 730, y: 140, r: 20, color: 'rgba(255, 0, 128, 0.1)' },
+        { x: 710, y: 180, r: 15, color: 'rgba(0, 255, 170, 0.1)' }
+      ];
+
+      circles.forEach(circle => {
+        ctx.beginPath();
+        ctx.arc(circle.x, circle.y, circle.r, 0, Math.PI * 2);
+        ctx.fillStyle = circle.color;
+        ctx.fill();
+      });
+
+      const imagePath = path.join(__dirname, 'cache', `balance_${targetID}.png`);
+      await fs.ensureDir(path.join(__dirname, 'cache'));
+      const buffer = canvas.toBuffer('image/png');
+      await fs.writeFile(imagePath, buffer);
+
+      message.reply({
+        body: getLang("cardMessage", userName, formatMoney(userMoney)),
+        attachment: fs.createReadStream(imagePath)
+      }, () => fs.unlinkSync(imagePath));
+
+    } catch (error) {
+      console.error(error);
+      message.reply(getLang("error"));
+    }
+  }
 };
+
+async function findUserByName(api, usersData, threadID, query) {
+  try {
+    const cleanQuery = query.replace(/@/g, "").trim().toLowerCase();
+    const threadInfo = await api.getThreadInfo(threadID);
+    const ids = threadInfo.participantIDs || [];
+    const matches = [];
+
+    for (const uid of ids) {
+      try {
+        const name = (await usersData.getName(uid)).toLowerCase();
+        if (name.includes(cleanQuery)) {
+          matches.push({ uid, name: await usersData.getName(uid) });
+        }
+      } catch {}
+    }
+
+    return matches;
+  } catch {
+    return [];
+  }
+		   }
